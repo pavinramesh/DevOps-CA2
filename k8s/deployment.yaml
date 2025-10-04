@@ -19,10 +19,13 @@ spec:
     spec:
       containers:
         - name: contract-gen
-          image: ghcr.io/pavinramesh/devops-ca2-backend:latest
+          image: ghcr.io/<YOUR_GH_USERNAME>/devops-ca2-backend:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
+          env:
+            - name: GROQ_API_KEY
+              value: "mock-key-for-development"   # 🔑 Replace with your key
           readinessProbe:
             httpGet: { path: "/", port: 8080 }
             initialDelaySeconds: 3
