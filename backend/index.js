@@ -1,5 +1,5 @@
 // backend/index.js
-// CommonJS version with Prometheus metrics & health endpoints
+// Express API with Prometheus metrics & Kubernetes-ready health checks
 
 const express = require('express');
 const mongoose = require('mongoose');
@@ -20,26 +20,43 @@ const app = express();
 
 // ---------------- Prometheus metrics ----------------
 const register = new client.Registry();
-// Default Node process/runtime metrics (CPU, memory, event loop, etc.)
+
+// Collect Node.js runtime & process metrics
 client.collectDefaultMetrics({ register });
 
-// Count every HTTP request by route/method/status
+// Counter for HTTP requests
 const httpReqCounter = new client.Counter({
   name: 'http_requests_total',
-  help: 'Total HTTP requests',
+  help: 'Total number of HTTP requests',
   labelNames: ['route', 'method', 'status']
 });
 register.registerMetric(httpReqCounter);
 
-// Use res "finish" event to reliably observe response status
+// Histogram for HTTP request durations
+const httpReqDuration = new client.Histogram({
+  name: 'http_request_duration_seconds',
+  help: 'Duration of HTTP requests in seconds',
+  labelNames: ['route', 'method', 'status'],
+  buckets: [0.05, 0.1, 0.2, 0.5, 1, 2, 5] // 50ms → 5s
+});
+register.registerMetric(httpReqDuration);
+
+// Middleware to track requests
 app.use((req, res, next) => {
+  const end = httpReqDuration.startTimer({
+    route: req.path,
+    method: req.method
+  });
+
   res.on('finish', () => {
     httpReqCounter.inc({
-      route: req.route?.path || req.path || 'unknown',
+      route: req.path,
       method: req.method,
       status: res.statusCode
     });
+    end({ status: res.statusCode });
   });
+
   next();
 });
 
@@ -49,12 +66,13 @@ app.get('/metrics', async (_req, res) => {
     res.set('Content-Type', register.contentType);
     res.end(await register.metrics());
   } catch (err) {
+    console.error('Metrics error:', err.message);
     res.status(500).send('Metrics collection error');
   }
 });
 // ----------------------------------------------------
 
-// Middleware
+// ---------------- Middleware ----------------
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
@@ -63,12 +81,12 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Define routes
+// ---------------- Routes ----------------
 app.use('/api/contracts', contractRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/ai', aiRoutes);
 
-// Health endpoints (useful for Kubernetes probes)
+// Root & health endpoints
 app.get('/', (_req, res) => {
   res.json({ message: 'Welcome to AI Legal Drafts API', ok: true });
 });
@@ -83,37 +101,36 @@ app.get('/readyz', (_req, res) => {
   res.status(status).json({ ok: mongoReady, mongoConnected: mongoReady });
 });
 
-// MongoDB Connection
+// ---------------- MongoDB ----------------
 const connectDB = async () => {
   try {
     if (!process.env.MONGODB_URI) {
-      console.warn('MONGODB_URI not set. API will run, but DB features may fail.');
+      console.warn('⚠️ MONGODB_URI not set. API will run without DB.');
       return;
     }
     await mongoose.connect(process.env.MONGODB_URI);
-    console.log('MongoDB connected successfully');
+    console.log('✅ MongoDB connected successfully');
   } catch (error) {
-    console.error('MongoDB connection error:', error.message);
-    // Do NOT exit; allow app to start for health/metrics & retry later if you add that
+    console.error('❌ MongoDB connection error:', error.message);
+    // Do not exit — app can still serve metrics/health
   }
 };
 
-// Start server
-// Use 8080 to align with Docker/K8s manifests
+// ---------------- Start Server ----------------
 const PORT = process.env.PORT || 8080;
 const HOST = process.env.HOST || '0.0.0.0';
 
 const server = app.listen(PORT, HOST, () => {
-  console.log(`Server running on http://${HOST}:${PORT}`);
-  console.log(`Metrics at http://localhost:${PORT}/metrics`);
+  console.log(`🚀 Server running on http://${HOST}:${PORT}`);
+  console.log(`📊 Metrics available at http://localhost:${PORT}/metrics`);
   connectDB();
 });
 
-// Graceful shutdown (useful in containers)
+// Graceful shutdown (important for containers)
 const shutdown = async (signal) => {
   try {
-    console.log(`${signal} received. Closing server...`);
-    server.close(() => console.log('HTTP server closed.'));
+    console.log(`\n${signal} received. Closing server...`);
+    server.close(() => console.log('✅ HTTP server closed.'));
     await mongoose.connection.close().catch(() => {});
   } finally {
     process.exit(0);
