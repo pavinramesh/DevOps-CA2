@@ -1,0 +1,16 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: contract-gen-sm
+  labels:
+    release: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: contract-gen
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+  namespaceSelector:
+    matchNames: [ default ]
