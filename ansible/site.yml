@@ -1,0 +1,27 @@
+---
+- hosts: local
+  become: true
+  vars:
+    new_user: devops
+  tasks:
+    - name: Ensure base packages
+      apt:
+        name:
+          - git
+          - curl
+        state: present
+        update_cache: yes
+
+    - name: Create runtime user
+      user:
+        name: "{{ new_user }}"
+        state: present
+        shell: /bin/bash
+
+    - name: Place a banner file
+      copy:
+        dest: /home/{{ new_user }}/configured_by_ansible.txt
+        content: "Configured on {{ ansible_date_time.date }}\n"
+        owner: "{{ new_user }}"
+        group: "{{ new_user }}"
+        mode: "0644"
