@@ -1,13 +1,15 @@
 FROM node:20-alpine
 
 WORKDIR /app
+
+# Copy package files first
 COPY package*.json ./
-RUN npm ci --omit=dev || npm install --omit=dev
 
+# Install ALL dependencies (including prom-client)
+RUN npm install --omit=dev
+
+# Copy rest of the code
 COPY . .
-
-# If you added "type":"module", nothing else to do.
-# If not using ES modules, your index.js should use require().
 
 EXPOSE 8080
 CMD ["npm", "start"]
